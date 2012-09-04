@@ -109,10 +109,10 @@ void static EraseFromWallets(uint256 hash)
 }
 
 // make sure all wallets know about the given transaction, in the given block
-void SyncWithWallets(const CTransaction& tx, const CBlock* pblock, bool fUpdate)
+void SyncWithWallets(CTxDB& txdb, const CTransaction& tx, const CBlock* pblock, bool fUpdate)
 {
     BOOST_FOREACH(CWallet* pwallet, setpwalletRegistered)
-        pwallet->AddToWalletIfInvolvingMe(tx, pblock, fUpdate);
+        pwallet->AddToWalletIfInvolvingMe(txdb, tx, pblock, fUpdate);
 }
 
 // notify wallets about a new best chain
@@ -1067,7 +1067,7 @@ bool CTransaction::DisconnectInputs(CTxDB& txdb)
 
 
 bool CTransaction::FetchInputs(CTxDB& txdb, const map<uint256, CTxIndex>& mapTestPool,
-                               bool fBlock, bool fMiner, MapPrevTx& inputsRet, bool& fInvalid)
+                               bool fBlock, bool fMiner, MapPrevTx& inputsRet, bool& fInvalid) const
 {
     // FetchInputs can return false either because we just haven't seen some inputs
     // (in which case the transaction should be stored as an orphan)
@@ -1345,11 +1345,88 @@ bool CBlock::DisconnectBlock(CTxDB& txdb, CBlockIndex* pindex)
     return true;
 }
 
+int CTransaction::GetPredefinedColor() const
+{
+    uint256 hash = this->GetHash();
+    if (hash == uint256("092ec331582704a05c5c0bde0b70825b2d31aea8342650582d889240da364397"))
+        return 1;
+    else if (IsCoinBase())
+        return COLOR_DEFAULT;
+    else 
+        return COLOR_UNKNOWN;
+}
+
+int CTransaction::GetColor(CTxDB& txdb) const
+{
+    uint256 hash = this->GetHash();
+    int color = GetPredefinedColor();
+
+    if (color == COLOR_UNKNOWN)
+        color = txdb.ReadColor(hash);
+
+    if (color == COLOR_UNKNOWN)
+    {
+        return ComputeColor(txdb);
+    }
+    else     
+        return color;
+}
+
+int CTransaction::ComputeColor(CTxDB& txdb) const
+{
+    int color = GetPredefinedColor();
+
+    if (color == COLOR_UNKNOWN)
+    {
+        MapPrevTx inputs;
+        bool invalid = false;
+        const std::map<uint256, CTxIndex> mapTestPool;
+        
+        if (FetchInputs(txdb, mapTestPool, false, false, inputs, invalid))
+            color = ComputeColor(txdb, inputs);
+    }
+  
+    return color;
+}
+
+int CTransaction::ComputeColor(CTxDB& txdb, MapPrevTx& inputs) const
+{
+    int color = GetPredefinedColor();
+
+    if (color == COLOR_UNKNOWN)
+    {
+        for (unsigned int i = 0; i < vin.size(); i++)
+        {
+            COutPoint prevout = vin[i].prevout;
+            CTransaction& txPrev = inputs[prevout.hash].second;
+            int prevtxcolor = txPrev.GetColor(txdb);
+
+            if (prevtxcolor == COLOR_UNKNOWN) 
+            { 
+                color = COLOR_UNKNOWN;
+                break;
+            }
+
+            if (color == COLOR_UNKNOWN)
+                color = prevtxcolor;
+            else
+                color = (color == prevtxcolor) ? color : COLOR_MIXED;
+        }
+    }
+
+    if (color != COLOR_UNKNOWN) txdb.WriteColor(GetHash(), color);
+
+    printf("color %i for hash: %s\n", color, GetHash().ToString().substr(0,10).c_str());
+
+    return color;
+}
+
 bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
 {
     // Check it again in case a previous version let a bad block in
     if (!CheckBlock(!fJustCheck, !fJustCheck))
         return false;
+
 
     // Do not allow blocks that contain transactions which 'overwrite' older transactions,
     // unless those are already completely spent.
@@ -1424,6 +1501,8 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
         }
 
         mapQueuedChanges[hashTx] = CTxIndex(posThisTx, tx.vout.size());
+
+        tx.ComputeColor(txdb, mapInputs);
     }
 
     if (vtx[0].GetValueOut() > GetBlockValue(pindex->nHeight, nFees))
@@ -1451,7 +1530,7 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
 
     // Watch for transactions paying to me
     BOOST_FOREACH(CTransaction& tx, vtx)
-        SyncWithWallets(tx, this, true);
+        SyncWithWallets(txdb, tx, this, true);
 
     return true;
 }
@@ -2849,7 +2928,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         bool fMissingInputs = false;
         if (tx.AcceptToMemoryPool(txdb, true, &fMissingInputs))
         {
-            SyncWithWallets(tx, NULL, true);
+            SyncWithWallets(txdb, tx, NULL, true);
             RelayMessage(inv, vMsg);
             mapAlreadyAskedFor.erase(inv);
             vWorkQueue.push_back(inv.hash);
@@ -2872,7 +2951,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
                     if (tx.AcceptToMemoryPool(txdb, true, &fMissingInputs2))
                     {
                         printf("   accepted orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
-                        SyncWithWallets(tx, NULL, true);
+                        SyncWithWallets(txdb, tx, NULL, true);
                         RelayMessage(inv, vMsg);
                         mapAlreadyAskedFor.erase(inv);
                         vWorkQueue.push_back(inv.hash);

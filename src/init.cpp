@@ -646,7 +646,12 @@ bool AppInit2()
     printf("Loading wallet...\n");
     nStart = GetTimeMillis();
     bool fFirstRun;
-    pwalletMain = new CWallet("wallet.dat");
+
+    string wallet_name = GetArg("-walletname", "wallet.dat");
+    int wallet_color = GetArg("-walletcolor", 0);
+
+    pwalletMain = new CWallet(wallet_name);
+    pwalletMain->SetColor(wallet_color);
     int nLoadWalletRet = pwalletMain->LoadWallet(fFirstRun);
     if (nLoadWalletRet != DB_LOAD_OK)
     {
