@@ -502,6 +502,23 @@ bool CTxDB::WriteBestInvalidWork(CBigNum bnBestInvalidWork)
     return Write(string("bnBestInvalidWork"), bnBestInvalidWork);
 }
 
+int CTxDB::ReadColor(uint256 txhash)
+{
+    int color;
+    if (Read(make_pair(string("txcolor"), txhash), color)) {
+        return color;
+    } else {
+        return COLOR_UNKNOWN;
+    }
+}
+
+bool CTxDB::WriteColor(uint256 txhash, int color)
+{
+    if (fReadOnly) return false;
+    else
+    return Write(make_pair(string("txcolor"), txhash), color);
+}
+
 CBlockIndex static * InsertBlockIndex(uint256 hash)
 {
     if (hash == 0)

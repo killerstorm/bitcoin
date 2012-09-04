@@ -291,10 +291,9 @@ public:
 };
 
 
-
-
-
-
+#define COLOR_UNKNOWN -2
+#define COLOR_MIXED -1
+#define COLOR_DEFAULT 0
 
 /** Access to the transaction database (blkindex.dat) */
 class CTxDB : public CDB
@@ -320,6 +319,9 @@ public:
     bool ReadBestInvalidWork(CBigNum& bnBestInvalidWork);
     bool WriteBestInvalidWork(CBigNum bnBestInvalidWork);
     bool LoadBlockIndex();
+
+    int ReadColor(uint256 txhash);
+    bool WriteColor(uint256 txhash, int color);
 private:
     bool LoadBlockIndexGuts();
 };

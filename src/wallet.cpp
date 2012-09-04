@@ -467,18 +467,32 @@ bool CWallet::AddToWallet(const CWalletTx& wtxIn)
     return true;
 }
 
+bool CWallet::AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate, bool fFindBlock)
+{
+    CTxDB txdb("r");
+    return AddToWalletIfInvolvingMe(txdb, tx, pblock, fUpdate, fFindBlock);
+}
+
+
+
 // Add a transaction to the wallet, or update it.
 // pblock is optional, but should be provided if the transaction is known to be in a block.
 // If fUpdate is true, existing transactions will be updated.
-bool CWallet::AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate, bool fFindBlock)
+bool CWallet::AddToWalletIfInvolvingMe(CTxDB& txdb, const CTransaction& tx, const CBlock* pblock, bool fUpdate, bool fFindBlock)
 {
     uint256 hash = tx.GetHash();
+   
     {
         LOCK(cs_wallet);
         bool fExisted = mapWallet.count(hash);
         if (fExisted && !fUpdate) return false;
         if (fExisted || IsMine(tx) || IsFromMe(tx))
         {
+            int txcolor = tx.GetColor(txdb);
+            
+            if (!((txcolor == color) || ((txcolor == COLOR_MIXED) && (color == 0)))) 
+                return false; // wrong color
+
             CWalletTx wtx(this,tx);
             // Get merkle branch if transaction was found in a block
             if (pblock)
