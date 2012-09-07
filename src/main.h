@@ -380,6 +380,15 @@ enum GetMinFee_mode
     GMF_SEND,
 };
 
+typedef int txcolor_t;
+
+enum TxColor 
+{
+    COLOR_UNKNOWN = -2,
+    COLOR_MIXED = -1,
+    COLOR_DEFAULT = 0
+};
+
 typedef std::map<uint256, std::pair<CTxIndex, CTransaction> > MapPrevTx;
 
 /** The basic transaction that is broadcasted on the network and contained in

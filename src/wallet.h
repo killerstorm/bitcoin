@@ -86,8 +86,7 @@ public:
 
     std::set<int64> setKeyPool;
 
-    int color;
-
+    txcolor_t currentColor;
 
     typedef std::map<unsigned int, CMasterKey> MasterKeyMap;
     MasterKeyMap mapMasterKeys;
@@ -100,7 +99,7 @@ public:
         fFileBacked = false;
         nMasterKeyMaxID = 0;
         pwalletdbEncryption = NULL;
-        color = 0;
+        currentColor = COLOR_UNKNOWN;
     }
     CWallet(std::string strWalletFileIn)
     {
@@ -110,7 +109,7 @@ public:
         fFileBacked = true;
         nMasterKeyMaxID = 0;
         pwalletdbEncryption = NULL;
-        color = 0;
+        currentColor = COLOR_UNKNOWN;
     }
 
     std::map<uint256, CWalletTx> mapWallet;
@@ -293,7 +292,7 @@ public:
     // get the current wallet format (the oldest client version guaranteed to understand this wallet)
     int GetVersion() { return nWalletVersion; }
 
-    void SetColor(int color) { this->color = color; }
+    void SetCurrentColor(int color) { this->currentColor = color; }
 
     /** Address book entry changed.
      * @note called with lock cs_wallet held.
@@ -373,6 +372,9 @@ public:
     std::string strFromAccount;
     std::vector<char> vfSpent; // which outputs are already spent
     int64 nOrderPos;  // position in ordered transaction list
+    txcolor_t color;    
+
+
 
     // memory only
     mutable bool fDebitCached;
@@ -425,6 +427,7 @@ public:
         nAvailableCreditCached = 0;
         nChangeCached = 0;
         nOrderPos = -1;
+        color = COLOR_UNKNOWN;
     }
 
     IMPLEMENT_SERIALIZE
@@ -437,6 +440,7 @@ public:
         if (!fRead)
         {
             pthis->mapValue["fromaccount"] = pthis->strFromAccount;
+            pthis->mapValue["color"] = i64tostr(pthis->color);
 
             std::string str;
             BOOST_FOREACH(char f, vfSpent)
@@ -465,6 +469,7 @@ public:
         if (fRead)
         {
             pthis->strFromAccount = pthis->mapValue["fromaccount"];
+            pthis->color = atoi64(pthis->mapValue["color"].c_str());
 
             if (mapValue.count("spent"))
                 BOOST_FOREACH(char c, pthis->mapValue["spent"])
@@ -481,6 +486,7 @@ public:
         pthis->mapValue.erase("version");
         pthis->mapValue.erase("spent");
         pthis->mapValue.erase("n");
+        pthis->mapValue.erase("color");
         pthis->mapValue.erase("timesmart");
     )
 
@@ -654,6 +660,14 @@ public:
         }
         return true;
     }
+
+    void SetColor(txcolor_t color) { this->color = color; }
+    bool MatchesCurrentColor(txcolor_t currentColor) const;
+    bool MatchesCurrentColor() const 
+    {
+        return MatchesCurrentColor(pwallet->currentColor);
+    }
+
 
     bool WriteToDisk();
 

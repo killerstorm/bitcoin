@@ -303,6 +303,7 @@ CWallet::TxItems CWallet::OrderedTxItems(std::list<CAccountingEntry>& acentries,
     for (map<uint256, CWalletTx>::iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
     {
         CWalletTx* wtx = &((*it).second);
+        if (!wtx->MatchesCurrentColor()) continue;
         txOrdered.insert(make_pair(wtx->nOrderPos, TxPair(wtx, (CAccountingEntry*)0)));
     }
     acentries.clear();
@@ -431,6 +432,11 @@ bool CWallet::AddToWallet(const CWalletTx& wtxIn)
                 wtx.fFromMe = wtxIn.fFromMe;
                 fUpdated = true;
             }
+            if (wtxIn.color != wtx.color)
+            {
+                wtx.color = wtxIn.color;
+                fUpdated = true;
+            }
             fUpdated |= wtx.UpdateSpent(wtxIn.vfSpent);
         }
 
@@ -481,19 +487,22 @@ bool CWallet::AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pbl
 bool CWallet::AddToWalletIfInvolvingMe(CTxDB& txdb, const CTransaction& tx, const CBlock* pblock, bool fUpdate, bool fFindBlock)
 {
     uint256 hash = tx.GetHash();
-   
+ 
     {
         LOCK(cs_wallet);
         bool fExisted = mapWallet.count(hash);
+
         if (fExisted && !fUpdate) return false;
         if (fExisted || IsMine(tx) || IsFromMe(tx))
         {
-            int txcolor = tx.GetColor(txdb);
-            
-            if (!((txcolor == color) || ((txcolor == COLOR_MIXED) && (color == 0)))) 
-                return false; // wrong color
-
             CWalletTx wtx(this,tx);
+
+            // we do it manually since reading color requires txdb
+            // and transaction has no access to it
+            // (or rather, reading color via its own txdb causes deadlock)
+            txcolor_t color = tx.GetColor(txdb);
+            wtx.SetColor(color);
+
             // Get merkle branch if transaction was found in a block
             if (pblock)
                 wtx.SetMerkleBranch(pblock);
@@ -568,6 +577,15 @@ bool CWallet::IsChange(const CTxOut& txout) const
             return true;
     }
     return false;
+}
+
+bool CWalletTx::MatchesCurrentColor(txcolor_t currentColor) const
+{
+    return (color == currentColor) 
+        || ((currentColor == COLOR_DEFAULT) && (color == COLOR_MIXED))
+        || (currentColor == COLOR_MIXED)
+        || (currentColor == COLOR_UNKNOWN);
+    
 }
 
 int64 CWalletTx::GetTxTime() const
@@ -936,7 +954,7 @@ int64 CWallet::GetBalance() const
         for (map<uint256, CWalletTx>::const_iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
         {
             const CWalletTx* pcoin = &(*it).second;
-            if (pcoin->IsFinal() && pcoin->IsConfirmed())
+            if (pcoin->MatchesCurrentColor() && pcoin->IsFinal() && pcoin->IsConfirmed())
                 nTotal += pcoin->GetAvailableCredit();
         }
     }
@@ -952,7 +970,7 @@ int64 CWallet::GetUnconfirmedBalance() const
         for (map<uint256, CWalletTx>::const_iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
         {
             const CWalletTx* pcoin = &(*it).second;
-            if (!pcoin->IsFinal() || !pcoin->IsConfirmed())
+            if (pcoin->MatchesCurrentColor() && (!pcoin->IsFinal() || !pcoin->IsConfirmed()))
                 nTotal += pcoin->GetAvailableCredit();
         }
     }
@@ -992,6 +1010,9 @@ void CWallet::AvailableCoins(vector<COutput>& vCoins, bool fOnlyConfirmed) const
                 continue;
 
             if (pcoin->IsCoinBase() && pcoin->GetBlocksToMaturity() > 0)
+                continue;
+
+            if (!pcoin->MatchesCurrentColor())
                 continue;
 
             for (unsigned int i = 0; i < pcoin->vout.size(); i++)
@@ -1164,6 +1185,7 @@ bool CWallet::CreateTransaction(const vector<pair<CScript, int64> >& vecSend, CW
         return false;
 
     wtxNew.BindWallet(this);
+    wtxNew.SetColor(currentColor);
 
     {
         LOCK2(cs_main, cs_wallet);
@@ -1636,6 +1658,9 @@ std::map<CTxDestination, int64> CWallet::GetAddressBalances()
                 continue;
 
             if (pcoin->IsCoinBase() && pcoin->GetBlocksToMaturity() > 0)
+                continue;
+
+            if (!pcoin->MatchesCurrentColor()) 
                 continue;
 
             int nDepth = pcoin->GetDepthInMainChain();

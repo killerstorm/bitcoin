@@ -291,10 +291,6 @@ public:
 };
 
 
-#define COLOR_UNKNOWN -2
-#define COLOR_MIXED -1
-#define COLOR_DEFAULT 0
-
 /** Access to the transaction database (blkindex.dat) */
 class CTxDB : public CDB
 {
